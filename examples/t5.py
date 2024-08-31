@@ -606,7 +606,8 @@ class t5_encoder_config:
   use_cache: bool = True
   vocab_size: int = 32128
 
-if __name__ == "__main__":
+
+def load_t5():
   t5_weights_url = 'https://huggingface.co/google/t5-v1_1-xxl/resolve/3db68a3ef122daf6e605701de53f766d671c19aa/model.safetensors'
   weights_fn = fetch(t5_weights_url)
   t5_state_dict = safe_load(weights_fn)
@@ -618,17 +619,5 @@ if __name__ == "__main__":
   t5_encoder_dict['encoder.embed_tokens.weight'] = t5_encoder_dict['shared.weight']
 
   t5 = T5EncoderModel(t5_encoder_config)
-  load_state_dict(t5, t5_encoder_dict)
-  # tiny_state_dict = get_state_dict(t5)
-  # for k, v in tiny_state_dict.items():
-  #   print(k, v.shape)
-    # t5_keys = sorted(list(t5_encoder_dict.keys()))
-  # tiny_keys = set(tiny_state_dict.keys())
-  # print(len(t5_keys))
-  # print(len(tiny_keys))
-  # for k in t5_keys:
-  #   if k not in tiny_keys:
-  #     print(k)
-  #   else:
-  #     tiny_keys.remove(k)
-  # print(tiny_keys)
+  load_state_dict(t5, t5_encoder_dict, strict=True)
+  return t5

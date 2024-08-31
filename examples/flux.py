@@ -2,12 +2,13 @@ import re
 from dataclasses import dataclass
 
 from tinygrad import Tensor, nn
+from tinygrad.dtype import dtypes
 import math
 
 from tinygrad.helpers import fetch
-from tinygrad.nn.state import safe_load
+from tinygrad.nn.state import safe_load, load_state_dict
 from extra.models.clip import FrozenClosedClipEmbedder
-
+from glob import iglob
 
 def randn_like(x:Tensor) -> Tensor: return Tensor.randn(*x.shape, dtype=x.dtype).to(device=x.device)
 
@@ -779,47 +780,90 @@ def vae_key_mapping(keys: list[str]):
   return key_map
 
 
+def load_vae():
+  ae_weights_url = 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors'
+  # tiny_state_dict =get_state_dict(ae)
+  weights_fn  = fetch(ae_weights_url, os.path.basename(str(ae_weights_url)))
+  weights = safe_load(weights_fn)
+  vae_key_map = vae_key_mapping(list(weights.keys()))
+  new_state_dict = {}
+  for k, v in weights.items():
+    new_key = vae_key_map[k]
+    new_state_dict[new_key] = v
+  ae = AutoEncoder(configs["flux-schnell"].ae_params)
+  load_state_dict(ae, new_state_dict, strict=True)
+  return ae
+
+def load_clip():
+  clip_weights_url = 'https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/model.safetensors'
+  weights_fn = fetch(clip_weights_url, os.path.basename(str(clip_weights_url)))
+  clip_state_dict = safe_load(weights_fn)
+  for k in list(clip_state_dict.keys()):
+    if k.startswith("text_model"):
+      new_key = 'transformer.' + k
+      clip_state_dict[new_key] = clip_state_dict.pop(k)
+  clip = FrozenClosedClipEmbedder()
+  load_state_dict(clip, clip_state_dict, strict=True)
+
+def load_flux():
+  flow_weights_url = 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors'
+  flow_weights_fn = fetch(flow_weights_url, os.path.basename(str(flow_weights_url)))
+  state_dict = safe_load(flow_weights_fn)
+  for key in list(state_dict.keys()):
+    if "scale" in key:
+      new_key = key.replace("scale", "weight")
+      state_dict[new_key] = state_dict.pop(key)
+  flow_model = Flux(configs["flux-schnell"].params)
+  load_state_dict(flow_model, state_dict, strict=True)
+
+
+@dataclass
+class SamplingOptions:
+  prompt: str
+  width: int
+  height: int
+  num_steps: int = 4
+  guidance: float = 3.5
+  seed: int | None = 42
+
+
+def get_noise(
+  num_samples: int,
+  height: int,
+  width: int,
+  device: str,
+  dtype: str,
+  seed: int,
+):
+  Tensor.manual_seed(seed)
+  return Tensor.randn(
+    num_samples,
+    16,
+    2 * math.ceil(height / 16),
+    2 * math.ceil(width / 16),
+    dtype=dtype,
+  ).to(device)
+
+def run_inference(width, height, seed, prompt, num_steps, guidance, output_dir, device="cpu"):
+  # allow for packing and conversion to latent space
+  height = 16 * (height // 16)
+  width = 16 * (width // 16)
+  output_name = os.path.join(output_dir, "img_{idx}.jpg")
+  if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+    idx = 0
+  else:
+    fns = [fn for fn in iglob(output_name.format(idx="*")) if re.search(r"img_[0-9]+\.jpg$", fn)]
+    if len(fns) > 0:
+      idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
+    else:
+      idx = 0
+  x = get_noise(1, height, width, device, dtype=dtypes.bfloat16, seed=seed)
+  print(x.realize())
+
+
 if __name__ == "__main__":
+  opts = SamplingOptions(prompt='Happy cat', width=384, height=384)
+  run_inference(opts.width, opts.height, opts.seed, opts.prompt, opts.num_steps, opts.guidance, output_dir=os.getcwd())
 
-  t5_weights_url = 'https://huggingface.co/google/t5-v1_1-xxl/resolve/3db68a3ef122daf6e605701de53f766d671c19aa/model.safetensors'
-  weights_fn = fetch(t5_weights_url)
-  t5_state_dict = safe_load(weights_fn)
-  for k, v in t5_state_dict.items():
-    print(k, v.shape)
 
-    # ae_weights_url = 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors'
-  # ae = AutoEncoder(configs["flux-schnell"].ae_params)
-  # # tiny_state_dict =get_state_dict(ae)
-  # weights_fn  = fetch(ae_weights_url, os.path.basename(str(ae_weights_url)))
-  # weights = safe_load(weights_fn)
-  # vae_key_map = vae_key_mapping(list(weights.keys()))
-  # new_state_dict = {}
-  # for k, v in weights.items():
-  #   new_key = vae_key_map[k]
-  #   new_state_dict[new_key] = v
-  # load_state_dict(ae, new_state_dict, strict=True)
-
-  # clip_weights_url = 'https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/model.safetensors'
-  # weights_fn = fetch(clip_weights_url, os.path.basename(str(clip_weights_url)))
-  # clip_state_dict = safe_load(weights_fn)
-  # for k in list(clip_state_dict.keys()):
-  #   if k.startswith("text_model"):
-  #     new_key = 'transformer.' + k
-  #     clip_state_dict[new_key] = clip_state_dict.pop(k)
-  # clip = FrozenClosedClipEmbedder()
-  # load_state_dict(clip, clip_state_dict, strict=True)
-
-    # flow_model = Flux(configs["flux-schnell"].params)
-  # flow_weights_url = 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors'
-  # flow_weights_fn = fetch(flow_weights_url, os.path.basename(str(flow_weights_url)))
-  # state_dict = safe_load(flow_weights_fn)
-  # for key in list(state_dict.keys()):
-  #   if "scale" in key:
-  #     new_key = key.replace("scale", "weight")
-  #     state_dict[new_key] = state_dict.pop(key)
-
-  # load_state_dict(flow_model, state_dict, strict=True)
-  # img = Tensor.randn(1, 3, 256, 256)
-  # ae_out = ae(img)
-  # print(ae_out.shape)
-  # ae_out.realize()
