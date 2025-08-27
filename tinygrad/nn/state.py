@@ -146,6 +146,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    # collect tensors to realize in one batched graph to reduce rewrite/scheduling overhead
+    to_realize: list[Tensor] = [] if realize else []
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
       t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
       if k not in state_dict and not strict:
@@ -157,9 +159,12 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
         if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
         else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
       else: v.replace(state_dict[k].to(v.device))
-      if realize: v.realize()
+      if realize: to_realize.append(v)
       if consume: del state_dict[k]
       ret.append(v)
+    # realize all copies at once to amortize graph rewrites and scheduling
+    if realize and len(to_realize) > 0:
+      to_realize[0].realize(*to_realize[1:])
   return ret
 
 @accept_filename

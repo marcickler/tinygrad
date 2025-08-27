@@ -272,6 +272,45 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
+# Define a pattern for sign(t):
+# sign(t) == where(t!=0, where(t<0, -1, 1), 0) [optionally + t*0]
+_t = UPat.var("t")
+# allow CONST or RESHAPE(CONST) for broadcast scalars
+_zero_c = UPat.const(None, 0)
+_neg1_c = UPat.const(None, -1)
+_pos1_c = UPat.const(None, 1)
+zero = UPat.any(_zero_c, UPat(Ops.RESHAPE, src=(_zero_c,)))
+neg_one = UPat.any(_neg1_c, UPat(Ops.RESHAPE, src=(_neg1_c,)))
+pos_one = UPat.any(_pos1_c, UPat(Ops.RESHAPE, src=(_pos1_c,)))
+
+# allow either (t!=0) or CAST(t)->bool as the nonzero check
+is_nonzero = UPat.any(UPat(Ops.CMPNE, src=(_t, zero)), _t.cast())
+is_neg = UPat(Ops.CMPLT, src=(_t, zero))
+base_sign = UPat(Ops.WHERE, src=(is_neg, neg_one, pos_one))
+sign_core = UPat(Ops.WHERE, src=(is_nonzero, base_sign, zero))
+# allow optional + t*0 in sign definition
+opt_zero_term = UPat(Ops.MUL, src=(_t, zero))
+sign_pat = UPat.any(sign_core, UPat(Ops.ADD, src=(sign_core, opt_zero_term)))
+
+# abs(t) == t * sign(t)
+abs_pat = UPat(Ops.MUL, src=[_t, sign_pat])  # list -> allow commutative order
+UPat(Ops.MUL, src=[_t, UPat.any(sign_core, UPat(Ops.ADD, src=(UPat(Ops.WHERE, src=(is_nonzero, base_sign, zero)), UPat(Ops.MUL, src=(_t, zero)))))])
+
+# abs(t) == t * sign(t) patterns and rewrites live below, before PatternMatcher construction
+# Two possible shapes to simplify:
+# 1) pow(abs(t), 2) where 2 may be a scalar or a broadcast RESHAPE of 2
+exp2_const = UPat.const(None, 2)
+exp2_bcast = UPat(Ops.RESHAPE, src=(exp2_const,))
+pow2_abs_pat = UPat(Ops.POW, src=(abs_pat, UPat.any(exp2_const, exp2_bcast)))
+# 2) abs(t) * abs(t)
+mul_abs_abs_pat = UPat(Ops.MUL, src=[abs_pat, abs_pat])
+# unified pattern
+abs2_pat = UPat.any(pow2_abs_pat, mul_abs_abs_pat)
+
+# Rewrite to t*t
+def rewrite_abs2(t):
+  return t * t
+
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
@@ -289,6 +328,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
+  # simplify (abs(x))**2 or abs(x)*abs(x) -> x*x
+  (pow2_abs_pat, rewrite_abs2),
+  (mul_abs_abs_pat, rewrite_abs2),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),

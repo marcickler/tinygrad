@@ -121,29 +121,29 @@ if __name__ == "__main__":
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
     load_state_dict(model, safe_load(weights_fn), strict=False)
 
-    if args.fp16:
-      for k,v in get_state_dict(model).items():
-        if k.startswith("model"):
-          v.replace(v.cast(dtypes.float16).realize())
-
-  c  = { "crossattn": model.cond_stage_model(args.prompt) }
-  uc = { "crossattn": model.cond_stage_model("") }
-  del model.cond_stage_model
-  print("created conditioning")
-
-  shape = (N, C, args.height // F, args.width // F)
-  randn = Tensor.randn(shape)
-
-  sampler = DPMPP2MSampler(args.guidance)
-  z = sampler(model.denoise, randn, c, uc, args.steps, timing=args.timing)
-  print("created samples")
-  x = model.decode(z, args.height, args.width).realize()
-  print("decoded samples")
-  print(x.shape)
-
-  im = Image.fromarray(x.numpy())
-  print(f"saving {args.out}")
-  im.save(args.out)
-
-  if not args.noshow:
-    im.show()
+  #   if args.fp16:
+  #     for k,v in get_state_dict(model).items():
+  #       if k.startswith("model"):
+  #         v.replace(v.cast(dtypes.float16).realize())
+  #
+  # c  = { "crossattn": model.cond_stage_model(args.prompt) }
+  # uc = { "crossattn": model.cond_stage_model("") }
+  # del model.cond_stage_model
+  # print("created conditioning")
+  #
+  # shape = (N, C, args.height // F, args.width // F)
+  # randn = Tensor.randn(shape)
+  #
+  # sampler = DPMPP2MSampler(args.guidance)
+  # z = sampler(model.denoise, randn, c, uc, args.steps, timing=args.timing)
+  # print("created samples")
+  # x = model.decode(z, args.height, args.width).realize()
+  # print("decoded samples")
+  # print(x.shape)
+  #
+  # im = Image.fromarray(x.numpy())
+  # print(f"saving {args.out}")
+  # im.save(args.out)
+  #
+  # if not args.noshow:
+  #   im.show()

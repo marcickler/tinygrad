@@ -19,9 +19,13 @@ exp_mul = t.abs()*t.abs()
 # Define a pattern for sign(t):
 # sign(t) == where(t!=0, where(t<0, -1, 1), 0) [optionally + t*0]
 _t = UPat.var("t")
-zero = UPat.const(None, 0)
-neg_one = UPat.const(None, -1)
-pos_one = UPat.const(None, 1)
+# allow CONST or RESHAPE(CONST) for broadcast scalars
+_zero_c = UPat.const(None, 0)
+_neg1_c = UPat.const(None, -1)
+_pos1_c = UPat.const(None, 1)
+zero = UPat.any(_zero_c, UPat(Ops.RESHAPE, src=(_zero_c,)))
+neg_one = UPat.any(_neg1_c, UPat(Ops.RESHAPE, src=(_neg1_c,)))
+pos_one = UPat.any(_pos1_c, UPat(Ops.RESHAPE, src=(_pos1_c,)))
 
 is_nonzero = UPat(Ops.CMPNE, src=(_t, zero))
 is_neg = UPat(Ops.CMPLT, src=(_t, zero))
@@ -53,9 +57,9 @@ pm_abs2 = PatternMatcher([
 
 def show_case(name, u):
   print(f"\n{name}:")
-  print("  Before:", render_uop(u))
+  print("  Before:", u)#render_uop(u))
   nu = graph_rewrite(u, pm_abs2, name="abs2->sq")
-  print("  After: ", render_uop(nu))
+  print("  After: ", nu)# render_uop(nu))
   print("  Matched:", nu is not u)
   print("  Is square mul:", nu.op is Ops.MUL and len(nu.src)==2 and nu.src[0] is nu.src[1])
   print("  Result:", Tensor(nu, device=t.device).tolist())
