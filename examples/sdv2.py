@@ -119,7 +119,10 @@ if __name__ == "__main__":
     weights_fn  = fetch(weights_url, os.path.basename(str(weights_url)))
 
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
-    load_state_dict(model, safe_load(weights_fn), strict=False)
+    load_state_dict(model, safe_load(weights_fn), strict=False, old=False)
+
+  with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+    load_state_dict(model, safe_load(weights_fn), strict=False, old=True)
 
   #   if args.fp16:
   #     for k,v in get_state_dict(model).items():
