@@ -272,6 +272,31 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
+def _is_const_val(u:UOp, val:float) -> bool:
+  # matches both CONST and VCONST with all elements equal to val
+  if u.op is Ops.CONST: return float(u.arg) == float(val)
+  if u.op is Ops.VCONST:
+    try: return all(float(v) == float(val) for v in u.arg)
+    except TypeError: return False
+  return False
+
+def _is_sign_of(s:UOp, x:UOp) -> bool:
+  # sign(x) without dtype-fix term: x.ne(0).where((x<0).where(-1,1), 0)
+  if s.op is not Ops.WHERE or len(s.src) != 3: return False
+  cond_nz, tbranch, fbranch = s.src
+  # false branch must be 0
+  if not _is_const_val(fbranch, 0): return False
+  # cond must be x != 0 OR a bool cast of x
+  cond_is_nz = (cond_nz.op is Ops.CMPNE and len(cond_nz.src) == 2 and cond_nz.src[0] is x and _is_const_val(cond_nz.src[1], 0))
+  cond_is_bool_cast = (cond_nz.op is Ops.CAST and cond_nz.dtype.scalar() == dtypes.bool and len(cond_nz.src) == 1 and cond_nz.src[0] is x)
+  if not (cond_is_nz or cond_is_bool_cast): return False
+  # true branch must be (x<0).where(-1, 1)
+  if tbranch.op is not Ops.WHERE or len(tbranch.src) != 3: return False
+  cond_lt0, tneg, tpos = tbranch.src
+  if not (cond_lt0.op is Ops.CMPLT and len(cond_lt0.src) == 2 and cond_lt0.src[0] is x and _is_const_val(cond_lt0.src[1], 0)): return False
+  if not (_is_const_val(tneg, -1) and _is_const_val(tpos, 1)): return False
+  return True
+
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
@@ -346,6 +371,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # mod folding
   (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
+  # cancel sign(x)^2 inside products: (x*sign(x))*(x*sign(x)) -> x*x
+  ((UPat.var("a") * UPat.var("a")),
+    lambda a: (y*y) if (a.op is Ops.MUL and len(a.src) == 2 and (
+                        (_is_sign_of(a.src[0], y:=a.src[1])) or (_is_sign_of(a.src[1], y:=a.src[0])))) else None),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
