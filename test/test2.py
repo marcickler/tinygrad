@@ -10,5 +10,3 @@ d = a.abs() * a.abs()
 print(b.tolist())
 print(c.tolist())
 print(d.tolist())
-
-
