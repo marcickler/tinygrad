@@ -451,6 +451,17 @@ def reduce_mul_chain(r:UOp):
   if len(outside) == 0: return None
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
+def get_mul_chain_terms(uop: UOp):
+  if uop.op is Ops.MUL: yield from get_mul_chain_terms(uop.src[0]); yield from get_mul_chain_terms(uop.src[1])
+  else: yield uop
+
+def remove_redundant_check_from_parent_mul(mul: UOp, x: UOp, cond_check: UOp, t, f) -> UOp | None:
+  terms = list(get_mul_chain_terms(mul))
+  new_terms = [t for t in terms if t is not cond_check]
+  if not new_terms: return mul.const_like(1)
+  if len(new_terms) == 1: return new_terms[0]
+  else: return functools.reduce(operator.mul, new_terms)
+
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
 REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
@@ -512,4 +523,5 @@ sym = symbolic_flat+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  (UPat(Ops.MUL, name="mul").f(Ops.CAST, dtype=dtypes.bool, name="cast"), remove_redundant_check_from_parent_mul)
 ])
